@@ -1,0 +1,33 @@
+# Render Blueprint — فِكرة
+# خدمة ويب واحدة (Node 22) + قرص دائم لقاعدة بيانات SQLite.
+# ملاحظة: القرص الدائم يتطلب خطة مدفوعة (starter فما فوق). لا تشغّل أكثر من نسخة واحدة (SQLite).
+services:
+  - type: web
+    name: fikra
+    runtime: node
+    plan: starter
+    region: frankfurt
+    numInstances: 1
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: fikra-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_PATH
+        value: /var/data/fikra.db
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: GEMINI_API_KEY
+        sync: false        # لا يُخزَّن في الملف: يطلب منك Render إدخاله عند إنشاء الخدمة
