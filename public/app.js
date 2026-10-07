@@ -178,3 +178,121 @@ function renderApp(){
  <nav class="bnav" aria-label="التنقل الرئيسي">${bn.map(([k,l])=>bnBtn(k,l)).join('')}</nav>`;
 }
 const bnBtn=(k,l)=>`<button data-p="${k}" ${k===navKey()?'aria-current="page"':''}>${ic(k==='more'?'more':k)}<span>${l}</span></button>`;
+
+/* ===== المرحلة 3: إدارة الأفكار ===== */
+let FM={mode:'quick',tags:[],files:[]},TAB='overview',openId=null,editId=null;
+const TABS=[['overview','نظرة عامة'],['map','الخريطة الذهنية'],['tasks','المهام'],['notes','الملاحظات'],['files','الملفات'],['links','الروابط'],['log','النشاط']];
+const cats=()=>[...CATS,...DB.get('cats:'+Auth.session().id,[])];
+const navKey=()=>['idea','new'].includes(page)?'ideas':page;
+const curIdea=()=>Ideas.all().find(x=>x.id===openId);
+const T=x=>esc(x||'').replace(/\n/g,'<br>'),txt=h=>(h||'').replace(/<[^>]*>/g,' ');
+const nrm=t=>String(t||'').toLowerCase().replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه');
+const hay=i=>nrm([i.title,i.body,i.category,i.problem,i.solution,i.audience,i.model,i.remarks,txt(i.notes),(i.tags||[]).join(' ').replace(/_/g,' ')].join(' '));
+const normTag=t=>t.trim().replace(/^#+/,'').replace(/\s+/g,'_').slice(0,30);
+const normUrl=u=>{u=u.trim();if(!u)return '';if(!/^https?:\/\//i.test(u))u='https://'+u;try{return new URL(u).href}catch(e){return ''}};
+const OKT=new Set(['B','STRONG','I','EM','U','H2','H3','UL','OL','LI','A','P','DIV','BR','INPUT','SPAN']);
+function clean(html){const t=document.createElement('template');t.innerHTML=html||'';
+ const walk=p=>{[...p.childNodes].forEach(c=>{if(c.nodeType!==1)return;const g=c.tagName;if(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META'].includes(g)){c.remove();return}walk(c);if(!OKT.has(g)){c.replaceWith(...c.childNodes);return}
+  [...c.attributes].forEach(a=>{const n=a.name;if(g==='A'&&n==='href'&&/^https?:\/\//i.test(a.value))return;if(g==='INPUT'&&((n==='type'&&a.value==='checkbox')||n==='checked'))return;if(g==='UL'&&n==='class'&&a.value==='chk')return;c.removeAttribute(n)});
+  if(g==='INPUT'&&c.type!=='checkbox')c.remove();if(g==='A'){c.setAttribute('target','_blank');c.setAttribute('rel','noopener noreferrer')}})};
+ walk(t.content);return t.innerHTML}
+const OKF=['image/png','image/jpeg','image/gif','image/webp','application/pdf','text/plain','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],MAXF=2*1024*1024;
+const readFile=f=>new Promise(r=>{if(!OKF.includes(f.type)){toast('نوع الملف غير مدعوم. المسموح: صور وPDF ونص ومستندات Word وExcel.','error');return r(null)}if(f.size>MAXF){toast('حجم «'+f.name+'» أكبر من 2 ميغابايت.','error');return r(null)}const fr=new FileReader();fr.onload=()=>r({id:uid(),name:f.name.slice(0,120),type:f.type,size:f.size,data:fr.result});fr.onerror=()=>{toast('تعذّرت قراءة الملف.','error');r(null)};fr.readAsDataURL(f)});
+const fileView=(f,rm)=>!/^data:[\w.+\/-]+;base64,/.test(f.data||'')?'<div class="card fcard small">ملف غير صالح</div>':`<div class="card fcard">${f.type.startsWith('image/')?`<img src="${f.data}" alt="${esc(f.name)}">`:f.type==='application/pdf'?`<embed src="${f.data}" type="application/pdf">`:''}<div class="small">${esc(f.name)}</div><div class="row small"><a class="link" href="${f.data}" download="${esc(f.name)}">تنزيل</a>${rm?`<button class="link" data-rmf="${f.id}">حذف</button>`:''}</div></div>`;
+function newIdea(id=null){editId=id;page='new';render();scrollTo(0,0)}
+function openIdea(id){if(!Ideas.all().some(x=>x.id===id)){toast('تعذر العثور على الفكرة.','error');return}openId=id;TAB='overview';Ideas.open(id);page='idea';render();scrollTo(0,0)}
+
+function renderForm(){const e=editId?Ideas.all().find(x=>x.id===editId):null,v=e||DB.get('draft:'+Auth.session().id,{});
+ FM={mode:e?'adv':'quick',tags:[...(v.tags||[])],files:[...(v.files||[])]};
+ const ta=(id,l,val)=>`<div class="field"><label for="${id}">${l}</label><textarea class="input" id="${id}">${esc(val||'')}</textarea></div>`;
+ return `<div class="card"><div class="tabs" role="tablist"><button class="tab" role="tab" data-mode="quick" aria-selected="${!e}">الوضع السريع</button><button class="tab" role="tab" data-mode="adv" aria-selected="${!!e}">الوضع المتقدم</button></div><div style="margin-top:18px">
+ <div class="field"><label for="f-t">عنوان الفكرة</label><input class="input" id="f-t" maxlength="120" value="${esc(v.title||'')}"><span class="err" id="f-t-e" role="alert"></span></div>
+ ${ta('f-b','وصف قصير',v.body)}
+ <div class="field"><label for="f-c">التصنيف</label><div class="row" style="flex-wrap:nowrap"><select class="input" id="f-c">${catOpts(v.category)}</select><button class="btn" type="button" id="f-ac">+ تصنيف</button></div><div class="row" id="ncrow" hidden style="flex-wrap:nowrap"><input class="input" id="f-nc" placeholder="اسم التصنيف الجديد" maxlength="30"><button class="btn" type="button" id="f-ncs">إضافة</button></div></div>
+ <div class="field"><label for="f-tag">الوسوم</label><input class="input" id="f-tag" placeholder="اكتب وسمًا ثم اضغط Enter"><div class="meta" id="tagbox"></div></div>
+ <div id="adv" ${e?'':'hidden'}>${ta('f-pr','المشكلة',v.problem)}${ta('f-so','الحل المقترح',v.solution)}${ta('f-au','الجمهور المستهدف',v.audience)}${ta('f-bm','نموذج العمل',v.model)}${ta('f-rm','الملاحظات',v.remarks)}
+ <div class="fgrid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"><div class="field"><label for="f-p">الأولوية</label><select class="input" id="f-p">${opts(PRI,v.priority||'medium')}</select></div><div class="field"><label for="f-s">الحالة</label><select class="input" id="f-s">${opts(STATUS,v.status||'new')}</select></div><div class="field"><label for="f-d">الموعد المستهدف</label><input class="input ltr" type="date" id="f-d" value="${v.due||''}"></div></div>
+ ${ta('f-l','الروابط (رابط في كل سطر)',(v.links||[]).join('\n'))}
+ <div class="field"><label for="f-file">المرفقات: صور أو PDF أو ملفات (حتى 2 ميغابايت للملف)</label><input class="input" type="file" id="f-file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,.docx,.xlsx"><ul id="fl" class="plain"></ul></div>
+ <div class="field"><label for="f-g">نسبة التقدم</label><input type="range" id="f-g" min="0" max="100" step="5" value="${v.progress||0}"></div></div>
+ <div class="row" style="justify-content:flex-start;margin-top:8px"><button class="btn primary" id="f-ok">${e?'حفظ التغييرات':'إنشاء الفكرة'}</button><button class="btn" id="f-x">إلغاء</button></div></div></div>`}
+function bindForm(){
+ const e=editId?Ideas.all().find(x=>x.id===editId):null,adv=$('#adv');if(!adv)return;
+ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{FM.mode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>x.setAttribute('aria-selected',String(x===b)));adv.hidden=FM.mode!=='adv'});
+ const dk='draft:'+Auth.session().id,sd=()=>{if(e)return;const g=id=>$(id)?$(id).value:'';DB.set(dk,{title:g('#f-t'),body:g('#f-b'),category:g('#f-c'),tags:FM.tags,problem:g('#f-pr'),solution:g('#f-so'),audience:g('#f-au'),model:g('#f-bm'),remarks:g('#f-rm'),links:g('#f-l').split('\n').filter(Boolean)})};
+ if(!e){$('#f-t').closest('.card').addEventListener('input',sd);if(DB.get(dk,{}).title)toast('تم استرجاع مسودتك السابقة.')}
+ const paint=()=>{sd();$('#tagbox').innerHTML=FM.tags.map((t,k)=>`<span class="chip">#${esc(t)}<button type="button" data-rt="${k}" aria-label="حذف الوسم">×</button></span>`).join('');
+  $('#fl').innerHTML=FM.files.map((x,k)=>`<li class="row small"><span>${esc(x.name)}</span><button class="link" type="button" data-rf="${k}">إزالة</button></li>`).join('');
+  document.querySelectorAll('[data-rt]').forEach(b=>b.onclick=()=>{FM.tags.splice(+b.dataset.rt,1);paint()});document.querySelectorAll('[data-rf]').forEach(b=>b.onclick=()=>{FM.files.splice(+b.dataset.rf,1);paint()})};paint();
+ const addTag=()=>{const i=$('#f-tag'),t=normTag(i.value);if(t&&!FM.tags.includes(t))FM.tags.push(t);i.value='';paint()};
+ $('#f-tag').onkeydown=ev=>{if(ev.key==='Enter'||ev.key===','){ev.preventDefault();addTag()}};
+ $('#f-ac').onclick=()=>{$('#ncrow').hidden=false;$('#f-nc').focus()};
+ $('#f-ncs').onclick=()=>{const n=$('#f-nc').value.trim();if(!n)return;const k='cats:'+Auth.session().id;if(!cats().includes(n))DB.set(k,[...DB.get(k,[]),n]);$('#f-c').innerHTML=catOpts(n);$('#ncrow').hidden=true;$('#f-nc').value='';toast('تمت إضافة التصنيف.')};
+ $('#f-file').onchange=async ev=>{for(const x of ev.target.files){const d=await readFile(x);if(d)FM.files.push(d)}ev.target.value='';paint()};
+ $('#f-x').onclick=()=>{if(e)openId=e.id;page=e?'idea':'ideas';render()};
+ $('#f-ok').onclick=()=>{const t=$('#f-t').value.trim();if(!t){setErr('f-t','اكتب عنوانًا للفكرة.');$('#f-t').focus();return}
+  addTag();const v=id=>$(id).value.trim();
+  const d={title:t,body:v('#f-b'),category:$('#f-c').value,tags:FM.tags,problem:v('#f-pr'),solution:v('#f-so'),audience:v('#f-au'),model:v('#f-bm'),remarks:v('#f-rm'),priority:$('#f-p').value,status:$('#f-s').value,due:$('#f-d').value,links:[...new Set($('#f-l').value.split('\n').map(normUrl).filter(Boolean))],files:FM.files,progress:+$('#f-g').value};
+  if(d.status==='done')d.progress=100;let r;
+  if(e){const lg=[];if(d.body!==e.body)lg.push('تم تعديل الوصف');if(d.status!==e.status)lg.push('تم تغيير الحالة إلى '+STATUS[d.status]);
+   if(['title','category','problem','solution','audience','model','remarks','priority','due'].some(k=>(d[k]||'')!==(e[k]||''))||JSON.stringify(d.tags)!==JSON.stringify(e.tags||[])||JSON.stringify(d.links)!==JSON.stringify(e.links||[]))lg.push('تم تعديل بيانات الفكرة');
+   if(d.files.map(x=>x.id).join()!==(e.files||[]).map(x=>x.id).join())lg.push('تم تحديث المرفقات');
+   r=Ideas.update(e.id,d,true,lg)?e:null}else r=Ideas.add(d);
+  if(!r){toast('تعذّر الحفظ. قد تكون مساحة التخزين ممتلئة، جرّب تقليل حجم المرفقات.','error');return}
+  if(!e)DB.del(dk);openId=r.id;TAB='overview';page='idea';toast(e?'تم حفظ التغييرات.':'تم إنشاء الفكرة.');render();scrollTo(0,0)}
+}
+function renderIdea(){const i=curIdea();if(!i){page='ideas';return emptyIdeas()}
+ const kv=(l,v)=>v?`<div><div class="muted small">${l}</div><div>${v}</div></div>`:'';
+ const body={
+ overview:()=>`<div class="card stack" style="gap:16px"><div class="fgrid2"><div class="field"><label for="d-st">الحالة</label><select class="input" id="d-st">${opts(STATUS,i.status)}</select></div><div class="field"><label for="d-ct">التصنيف</label><select class="input" id="d-ct">${catOpts(i.category)}</select></div></div><div class="meta"><span class="badge">${i.archived?'📦 مؤرشفة':STATUS[i.status]}</span><span class="badge neutral">الأولوية: ${PRI[i.priority]||''}</span>${i.category?`<span class="badge neutral">${esc(i.category)}</span>`:''}${(i.tags||[]).map(t=>`<span class="badge neutral">#${esc(t)}</span>`).join('')}</div><div class="prog"><i style="width:${i.progress}%"></i></div>${kv('الوصف',T(i.body))}${kv('المشكلة',T(i.problem))}${kv('الحل المقترح',T(i.solution))}${kv('الجمهور المستهدف',T(i.audience))}${kv('نموذج العمل',T(i.model))}${kv('الموعد المستهدف',i.due?new Date(i.due).toLocaleDateString('ar'):'')}${kv('الملاحظات',T(i.remarks))}</div>`,
+ map:()=>mapTab(i),
+ tasks:()=>`<div class="card stack"><div class="row" style="flex-wrap:nowrap"><input class="input" id="t-in" placeholder="أضف مهمة جديدة" maxlength="200"><button class="btn primary" id="t-add">إضافة</button></div>${(i.tasks||[]).length?`<ul class="plain">${i.tasks.map(k=>`<li class="row"><label class="row" style="flex-wrap:nowrap;justify-content:flex-start"><input type="checkbox" data-tk="${k.id}" ${k.done?'checked':''}><span ${k.done?'style="text-decoration:line-through;opacity:.6"':''}>${esc(k.text)}</span></label><button class="link" data-td="${k.id}">حذف</button></li>`).join('')}</ul>`:'<p class="muted">لا توجد مهام بعد. أضف أول مهمة لهذه الفكرة.</p>'}</div>`,
+ notes:()=>`<div class="card"><div class="etb"><button class="btn" data-cmd="bold" aria-label="غامق"><b>غ</b></button><button class="btn" data-cmd="italic" aria-label="مائل"><i>م</i></button><button class="btn" data-cmd="h2">عنوان</button><button class="btn" data-cmd="ul">قائمة</button><button class="btn" data-cmd="ol">مرقّمة</button><button class="btn" data-cmd="chk">قائمة مهام</button><button class="btn" data-cmd="link">رابط</button></div><div class="row" id="lkrow" hidden style="flex-wrap:nowrap;margin-bottom:8px"><input class="input ltr" id="lk" placeholder="https://"><button class="btn" id="lk-ok">إدراج</button></div><div class="ed" id="ed" contenteditable="true" role="textbox" aria-multiline="true" aria-label="الملاحظات" data-ph="اكتب ملاحظاتك هنا…">${clean(i.notes)}</div><div class="status small" id="ns" style="margin-top:8px"><span class="dot"></span>تم الحفظ</div></div>`,
+ files:()=>`<div class="card stack"><input class="input" type="file" id="d-file" multiple accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,.docx,.xlsx" aria-label="إضافة ملفات">${(i.files||[]).length?`<div class="files">${i.files.map(x=>fileView(x,true)).join('')}</div>`:'<p class="muted">لا توجد ملفات. أرفق صورًا أو PDF أو أي ملف (حتى 2 ميغابايت).</p>'}</div>`,
+ links:()=>`<div class="card stack"><div class="row" style="flex-wrap:nowrap"><input class="input ltr" id="l-in" placeholder="https://example.com"><button class="btn primary" id="l-add">إضافة</button></div>${(i.links||[]).length?`<ul class="plain">${i.links.map((u,k)=>`<li class="row"><a class="link" dir="ltr" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a><button class="link" data-rl="${k}">حذف</button></li>`).join('')}</ul>`:'<p class="muted">لا توجد روابط بعد.</p>'}</div>`,
+ log:()=>`<div class="card"><ul class="plain">${[...(i.log&&i.log.length?i.log:[{t:i.createdAt,m:'تم إنشاء الفكرة'}])].reverse().map(l=>`<li class="row" title="${new Date(l.t).toLocaleString('ar')}"><span>${esc(l.m)}</span><span class="muted small">${ago(l.t)}</span></li>`).join('')}</ul></div>`};
+ return `<div class="row" style="margin-bottom:16px"><button class="btn ghost" id="d-back">رجوع</button><div class="row"><button class="btn" id="d-map">🧠 الخريطة الذهنية</button><button class="btn" id="d-ai">✨ حوّل فكرتي إلى خريطة ذهنية</button><button class="btn" id="d-edit">تعديل</button><button class="btn" id="d-fav">${i.favorite?'★ في المفضلة':'☆ مفضلة'}</button><button class="btn" id="d-share">مشاركة</button><button class="btn" id="d-arch">${i.archived?'استعادة':'أرشفة'}</button><button class="btn danger" id="d-del">حذف</button><div class="dd"><button class="btn" id="d-more" aria-haspopup="true">المزيد</button><div class="dd-menu" id="d-menu" hidden><button class="nav" id="d-dup">تكرار الفكرة</button></div></div></div></div><div class="tabs" role="tablist">${TABS.map(([k,l])=>`<button class="tab" role="tab" data-tab="${k}" aria-selected="${k===TAB}">${l}</button>`).join('')}</div><div style="margin-top:16px">${body[TAB]()}</div>`}
+function bindDetail(){const i=curIdea();if(!i)return;
+ document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;render()});
+ $('#d-back').onclick=()=>{page='ideas';render()};$('#d-edit').onclick=()=>newIdea(i.id);
+ $('#d-ai').onclick=()=>aiMap(i.id);
+ $('#d-map').onclick=()=>{if(DB.get(mapKey(i.id),null))openMap(i.id);else{TAB='map';render()}};
+ const ds=$('#d-st');if(ds){ds.onchange=()=>{const p={status:ds.value};if(p.status==='done')p.progress=100;if(!Ideas.update(i.id,p,true,['تم تغيير الحالة إلى '+STATUS[p.status]]))toast('تعذّر حفظ التغييرات.','error');render()};
+  $('#d-ct').onchange=e=>{if(!Ideas.update(i.id,{category:e.target.value},true,['تم تعديل بيانات الفكرة']))toast('تعذّر حفظ التغييرات.','error');render()}}
+ $('#d-fav').onclick=()=>{Ideas.update(i.id,{favorite:!i.favorite},false);render()};
+ $('#d-share').onclick=async()=>{const t=[i.title,i.body,(i.tags||[]).map(x=>'#'+x).join(' ')].filter(Boolean).join('\n');try{if(navigator.share)await navigator.share({title:i.title,text:t});else{await navigator.clipboard.writeText(t);toast('تم نسخ ملخص الفكرة.')}}catch(e){if(e.name!=='AbortError')toast('تعذّرت المشاركة.','error')}};
+ $('#d-arch').onclick=()=>{Ideas.update(i.id,{archived:!i.archived},true,[i.archived?'تمت استعادة الفكرة':'تمت أرشفة الفكرة']);toast(i.archived?'تمت استعادة الفكرة.':'تمت أرشفة الفكرة.');page='ideas';render()};
+ const dl=$('#d-del');dl.onclick=()=>{if(dl.dataset.sure){Ideas.remove(i.id);toast('تم حذف الفكرة.');page='ideas';render()}else{dl.dataset.sure=1;dl.textContent='اضغط للتأكيد'}};
+ $('#d-more').onclick=()=>{$('#d-menu').hidden=!$('#d-menu').hidden};
+ $('#d-dup').onclick=()=>{const {id,log,createdAt,updatedAt,openedAt,...r}=i,n=Ideas.add({...r,title:i.title+' (نسخة)',favorite:false,archived:false});if(n){openId=n.id;TAB='overview';toast('تم تكرار الفكرة.');render()}else toast('تعذّر الحفظ.','error')};
+ const up=(p,lg)=>{if(!Ideas.update(i.id,p,true,lg||[]))toast('تعذّر الحفظ. قد تكون مساحة التخزين ممتلئة.','error');render()};
+ if(TAB==='tasks'){const add=()=>{const t=$('#t-in').value.trim();if(t){up({tasks:[...(i.tasks||[]),{id:uid(),text:t,done:false}]},['تم إضافة مهمة: '+t]);$('#t-in')?.focus()}};$('#t-add').onclick=add;$('#t-in').onkeydown=ev=>{if(ev.key==='Enter')add()};
+  document.querySelectorAll('[data-tk]').forEach(c=>c.onchange=()=>up({tasks:i.tasks.map(k=>k.id===c.dataset.tk?{...k,done:c.checked}:k)},c.checked?['تم إنجاز مهمة']:[]));
+  document.querySelectorAll('[data-td]').forEach(b=>b.onclick=()=>up({tasks:i.tasks.filter(k=>k.id!==b.dataset.td)},['تم حذف مهمة']))}
+ if(TAB==='links'){const add=()=>{const u=normUrl($('#l-in').value);if(!u){toast('أدخل رابطًا صحيحًا.','error');return}up({links:[...new Set([...(i.links||[]),u])]},['تمت إضافة رابط'])};$('#l-add').onclick=add;$('#l-in').onkeydown=ev=>{if(ev.key==='Enter')add()};document.querySelectorAll('[data-rl]').forEach(b=>b.onclick=()=>up({links:i.links.filter((_,k)=>k!==+b.dataset.rl)},['تم حذف رابط']))}
+ if(TAB==='files'){$('#d-file').onchange=async ev=>{const n=[];for(const x of ev.target.files){const d=await readFile(x);if(d)n.push(d)}if(n.length)up({files:[...(i.files||[]),...n]},n.map(x=>'تمت إضافة ملف: '+x.name))};document.querySelectorAll('[data-rmf]').forEach(b=>b.onclick=()=>up({files:i.files.filter(x=>x.id!==b.dataset.rmf)},['تم حذف ملف']))}
+ if(TAB==='map'){const c=$('#mk-create'),o=$('#mk-open'),dm=$('#mk-del'),ab=$('#mk-ai');if(ab)ab.onclick=()=>aiMap(i.id);if(c)c.onclick=()=>{if(createMap(i))openMap(i.id)};if(o)o.onclick=()=>openMap(i.id);if(dm)dm.onclick=()=>{if(dm.dataset.sure){DB.del(mapKey(i.id));Ideas.update(i.id,{},true,['تم حذف الخريطة الذهنية']);toast('تم حذف الخريطة.');render()}else{dm.dataset.sure=1;dm.textContent='اضغط للتأكيد'}}}
+ if(TAB==='notes')bindEditor()}
+function bindEditor(){const ed=$('#ed');let tm,rng;
+ const save=()=>{ed.querySelectorAll('input').forEach(c=>c.checked?c.setAttribute('checked',''):c.removeAttribute('checked'));$('#ns').innerHTML='<span class="dot busy"></span>جارٍ الحفظ…';clearTimeout(tm);
+  tm=setTimeout(()=>{const c=curIdea();if(!c)return;const last=(c.log||[]).slice(-1)[0],lg=last&&last.m==='تم تحديث الملاحظات'&&Date.now()-last.t<6e5?[]:['تم تحديث الملاحظات'];const ok=Ideas.update(c.id,{notes:clean(ed.innerHTML)},true,lg),s=$('#ns');if(s)s.innerHTML=ok?'<span class="dot"></span>تم الحفظ':'تعذّر الحفظ'},500)};
+ ed.oninput=save;ed.onchange=save;
+ ed.onkeydown=ev=>{if(ev.key==='Enter')setTimeout(()=>{const n=getSelection().anchorNode,el=n&&(n.nodeType===3?n.parentNode:n),li=el&&el.closest&&el.closest('ul.chk li');if(li&&!li.querySelector('input'))li.insertAdjacentHTML('afterbegin','<input type="checkbox">')},0)};
+ document.querySelectorAll('[data-cmd]').forEach(b=>{b.onmousedown=ev=>ev.preventDefault();b.onclick=()=>{const c=b.dataset.cmd;ed.focus();
+  if(c==='bold'||c==='italic')document.execCommand(c);else if(c==='h2')document.execCommand('formatBlock',false,'H2');else if(c==='ul')document.execCommand('insertUnorderedList');else if(c==='ol')document.execCommand('insertOrderedList');
+  else if(c==='chk')document.execCommand('insertHTML',false,'<ul class="chk"><li><input type="checkbox">&nbsp;</li></ul>');
+  else{const s=getSelection();rng=s.rangeCount?s.getRangeAt(0).cloneRange():null;$('#lkrow').hidden=false;$('#lk').focus();return}
+  save()}});
+ $('#lk-ok').onclick=()=>{const u=normUrl($('#lk').value);if(!u){toast('أدخل رابطًا صحيحًا.','error');return}ed.focus();if(rng){const s=getSelection();s.removeAllRanges();s.addRange(rng)}document.execCommand('createLink',false,u);$('#lkrow').hidden=true;$('#lk').value='';save()}}
+
+/* ===== المرحلة 4: محرك الخريطة الذهنية ===== */
+const TYPES={idea:['فكرة','💡'],feature:['ميزة','⭐'],problem:['مشكلة','⚠️'],solution:['حل','🛠️'],audience:['جمهور','👥'],competitor:['منافس','🏁'],task:['مهمة','☑️'],goal:['هدف','🎯'],note:['ملاحظة','📝'],question:['سؤال','❓']};
+const COLORS={def:'افتراضي',blue:'أزرق',purple:'بنفسجي',green:'أخضر',orange:'برتقالي',red:'أحمر',gray:'رمادي'};
+const GAP=16,HG=70,mapKey=id=>'map:'+Auth.session().id+':'+id;
+let S=null,ix={};
+const cvx=document.createElement('canvas').getContext('2d');
+const tw=(t,fs,w)=>{cvx.font=`${w} ${fs}px "IBM Plex Sans Arabic",Tahoma,sans-serif`;return cvx.measureText(t).width};
+const mkNode=(mid,pid,title,type,order,x,y)=>{const n=Date.now();return{id:uid(),mindMapId:mid,parentId:pid,title,description:'',notes:'',type,positionX:x,positionY:y,color:'def',icon:pid?'':TYPES[type][1],isCollapsed:false,isCompleted:false,order,createdAt:n,updatedAt:n}};
+function mapTab(i){const m=DB.get(mapKey(i.id),null),ai=`<button class="btn ${m?'':'primary'}" id="mk-ai">✨ حوّل فكرتي إلى خريطة ذهنية</button>`;
+ return m?`<div class="card empty"><div class="ic">${ic('maps')}</div><h2>${esc(m.title)}</h2><p class="muted">${N(m.nodes.length)} عقدة — آخر تحديث ${ago(m.updatedAt)}</p><div class="row" style="justify-content:center"><button class="btn primary" id="mk-open">فتح الخريطة</button>${ai}<button class="btn ghost danger" id="mk-del">حذف الخريطة</button></div></div>`
+ :`<div class="card empty"><div class="ic">${ic('maps')}</div><h2>لا توجد خريطة ذهنية بعد</h2><p class="muted">حوّل فكرتك إلى فروع مترابطة بالذكاء الاصطناعي، أو ابدأ خريطة فارغة وابنها بنفسك.</p><div class="row" style="justify-content:center">${ai}<button class="btn" id="mk-create">إنشاء خريطة فارغة</button></div></div>`}
