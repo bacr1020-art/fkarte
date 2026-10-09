@@ -35,7 +35,7 @@ async function generateJson({ system, prompt, schema, maxTokens = 4096 }) {
 
   if (status !== 200) {
     let detail = ''; try { const j = JSON.parse(text); detail = `${j.error?.status || ''} ${j.error?.message || ''}`; } catch (e) { /* غير JSON */ }
-    console.error('[ai] http', status, redact(detail).slice(0, 200));          // لا نسجّل المفتاح ولا محتوى الفكرة
+    console.error('[ai] http', status, redact(text).slice(0, 1500));       // لا نسجّل المفتاح ولا محتوى الفكرة
     if (status === 429) throw fail(429, 'ai_rate_limited', 'تم الوصول إلى حد الاستخدام مؤقتًا. حاول لاحقًا.');
     if (status >= 500) throw fail(502, 'ai_unavailable', 'خدمة الذكاء الاصطناعي غير متاحة الآن. حاول لاحقًا.');
     throw fail(502, 'ai_config', 'تعذر الوصول إلى الذكاء الاصطناعي. تحقق من مفتاح Gemini واسم النموذج في إعدادات الخادم.');
