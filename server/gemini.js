@@ -24,8 +24,7 @@ async function generateJson({ system, prompt, schema, maxTokens = 4096 }) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.8, maxOutputTokens: maxTokens },
-      }),
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.8, maxOutputTokens: maxTokens },
     });
     status = r.status; text = await r.text();
   } catch (e) {
